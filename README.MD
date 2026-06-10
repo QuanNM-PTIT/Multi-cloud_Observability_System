@@ -2,7 +2,9 @@
 # Multi-Cloud VM Observability System Using OpenTelemetry Collector Agent
 
 > Student: B25CHHT048 - Nguyễn Mạnh Quân
+
 > Supervisor: TS. Đặng Ngọc Hùng
+
 > Course: Graduation Internship - Master Program, PTIT
 
 ## 1. Project Overview
