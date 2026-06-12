@@ -1,0 +1,87 @@
+services:
+  obs-ingestion-proxy:
+    image: nginx:1.27-alpine
+    container_name: obs-ingestion-proxy
+    restart: unless-stopped
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - victoriametrics
+    networks:
+      - observability-net
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: victoriametrics
+    restart: unless-stopped
+    command:
+      - "-storageDataPath=/victoria-metrics-data"
+      - "-retentionPeriod=30d"
+      - "-httpListenAddr=:8428"
+    volumes:
+      - ./data/victoriametrics:/victoria-metrics-data
+    networks:
+      - observability-net
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_SERVER_ROOT_URL}
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3000:3000"
+    depends_on:
+      - victoriametrics
+    networks:
+      - observability-net
+
+  vmalert:
+    image: victoriametrics/vmalert:latest
+    container_name: vmalert
+    restart: unless-stopped
+    command:
+      - "-datasource.url=http://victoriametrics:8428"
+      - "-remoteRead.url=http://victoriametrics:8428"
+      - "-remoteWrite.url=http://victoriametrics:8428"
+      - "-notifier.url=http://vmalertmanager:9093"
+      - "-rule=/etc/vmalert/rules/*.yml"
+      - "-httpListenAddr=:8880"
+    volumes:
+      - ./configs/vmalert/rules:/etc/vmalert/rules:ro
+    ports:
+      - "8880:8880"
+    depends_on:
+      - victoriametrics
+      - vmalertmanager
+    networks:
+      - observability-net
+
+  vmalertmanager:
+    image: prom/alertmanager:latest
+    container_name: vmalertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.listen-address=:9093"
+    volumes:
+      - ./configs/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    networks:
+      - observability-net
+
+networks:
+  observability-net:
+    driver: bridge
