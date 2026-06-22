@@ -22,21 +22,23 @@ def upgrade() -> None:
         """
         CREATE TABLE users (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            username VARCHAR(100) UNIQUE NOT NULL,
-            email VARCHAR(255) UNIQUE NOT NULL,
+            username VARCHAR(100) NOT NULL,
+            email VARCHAR(255) NOT NULL,
             full_name VARCHAR(255),
             password_hash VARCHAR(255) NOT NULL,
             grafana_user_id VARCHAR(100),
             status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
-            last_login_at TIMESTAMP,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP,
+            last_login_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ,
             deleted BOOLEAN NOT NULL DEFAULT false,
             CONSTRAINT ck_users_status CHECK (status IN ('ACTIVE', 'LOCKED', 'DISABLED'))
         );
 
         CREATE INDEX ix_users_username ON users (username);
         CREATE INDEX ix_users_email ON users (email);
+        CREATE UNIQUE INDEX uq_users_username_active ON users (username) WHERE deleted = false;
+        CREATE UNIQUE INDEX uq_users_email_active ON users (email) WHERE deleted = false;
 
         CREATE TABLE vm_instances (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -51,17 +53,17 @@ def upgrade() -> None:
             description TEXT,
             monitoring_status VARCHAR(50) NOT NULL DEFAULT 'NOT_INSTALLED',
             is_monitoring BOOLEAN NOT NULL DEFAULT false,
-            last_seen_at TIMESTAMP,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP,
+            last_seen_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ,
             deleted BOOLEAN NOT NULL DEFAULT false,
-            CONSTRAINT uq_vm_user_name_provider UNIQUE (user_id, vm_name, cloud_provider),
             CONSTRAINT ck_vm_monitoring_status CHECK (
                 monitoring_status IN ('NOT_INSTALLED', 'PACKAGE_GENERATED', 'DOWNLOADED', 'INSTALLING', 'RUNNING', 'STOPPED', 'ERROR', 'NO_DATA')
             )
         );
 
         CREATE INDEX ix_vm_instances_user_id ON vm_instances (user_id);
+        CREATE UNIQUE INDEX uq_vm_user_name_provider_active ON vm_instances (user_id, vm_name, cloud_provider) WHERE deleted = false;
 
         CREATE TABLE agent_tokens (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -69,11 +71,11 @@ def upgrade() -> None:
             token_hash VARCHAR(255) UNIQUE NOT NULL,
             token_prefix VARCHAR(30),
             status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
-            expired_at TIMESTAMP,
-            revoked_at TIMESTAMP,
-            last_used_at TIMESTAMP,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP,
+            expired_at TIMESTAMPTZ,
+            revoked_at TIMESTAMPTZ,
+            last_used_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ,
             CONSTRAINT ck_agent_tokens_status CHECK (status IN ('ACTIVE', 'REVOKED', 'EXPIRED'))
         );
 
@@ -92,10 +94,10 @@ def upgrade() -> None:
             os_type VARCHAR(50) NOT NULL,
             agent_version VARCHAR(50),
             status VARCHAR(30) NOT NULL DEFAULT 'GENERATED',
-            downloaded_at TIMESTAMP,
-            expired_at TIMESTAMP,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP,
+            downloaded_at TIMESTAMPTZ,
+            expired_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ,
             CONSTRAINT ck_agent_packages_status CHECK (status IN ('GENERATED', 'DOWNLOADED', 'EXPIRED', 'REVOKED'))
         );
 
@@ -112,7 +114,7 @@ def upgrade() -> None:
             error_detail TEXT,
             agent_version VARCHAR(50),
             source_ip VARCHAR(50),
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT ck_agent_install_events_type CHECK (
                 event_type IN ('PACKAGE_GENERATED', 'PACKAGE_DOWNLOADED', 'INSTALL_STARTED', 'INSTALLED', 'STARTED', 'STOPPED', 'UNINSTALLED', 'ERROR')
             ),
@@ -127,10 +129,10 @@ def upgrade() -> None:
             agent_status VARCHAR(50) NOT NULL DEFAULT 'UNKNOWN',
             agent_version VARCHAR(50),
             service_status VARCHAR(50),
-            last_seen_at TIMESTAMP,
-            last_heartbeat_at TIMESTAMP,
+            last_seen_at TIMESTAMPTZ,
+            last_heartbeat_at TIMESTAMPTZ,
             last_error_message TEXT,
-            updated_at TIMESTAMP,
+            updated_at TIMESTAMPTZ,
             CONSTRAINT ck_vm_agent_status_agent_status CHECK (agent_status IN ('UNKNOWN', 'RUNNING', 'STOPPED', 'ERROR', 'NO_DATA', 'UNINSTALLED')),
             CONSTRAINT ck_vm_agent_status_service_status CHECK (service_status IS NULL OR service_status IN ('active', 'inactive', 'failed', 'unknown'))
         );
@@ -148,8 +150,8 @@ def upgrade() -> None:
             dashboard_url VARCHAR(500),
             mapping_type VARCHAR(50) NOT NULL,
             status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ,
             CONSTRAINT ck_grafana_mappings_type CHECK (mapping_type IN ('USER', 'VM', 'DASHBOARD', 'FOLDER')),
             CONSTRAINT ck_grafana_mappings_status CHECK (status IN ('ACTIVE', 'ERROR', 'DISABLED'))
         );
@@ -167,8 +169,8 @@ def upgrade() -> None:
             iframe_url VARCHAR(1000) NOT NULL,
             is_default BOOLEAN NOT NULL DEFAULT false,
             status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ,
             CONSTRAINT ck_grafana_dashboard_panels_type CHECK (panel_type IN ('CPU', 'MEMORY', 'DISK', 'NETWORK', 'AGENT_STATUS', 'VM_STATUS')),
             CONSTRAINT ck_grafana_dashboard_panels_status CHECK (status IN ('ACTIVE', 'ERROR', 'DISABLED'))
         );
@@ -180,21 +182,22 @@ def upgrade() -> None:
             user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             vm_id UUID REFERENCES vm_instances(id) ON DELETE CASCADE,
             rule_name VARCHAR(255) NOT NULL,
-            rule_code VARCHAR(100) UNIQUE NOT NULL,
+            rule_code VARCHAR(100) NOT NULL,
             metric_name VARCHAR(255),
             promql_expr TEXT NOT NULL,
             condition_text VARCHAR(500),
             duration VARCHAR(50) NOT NULL,
             severity VARCHAR(30) NOT NULL,
             enabled BOOLEAN NOT NULL DEFAULT true,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ,
             deleted BOOLEAN NOT NULL DEFAULT false,
             CONSTRAINT ck_alert_rules_severity CHECK (severity IN ('info', 'warning', 'critical'))
         );
 
         CREATE INDEX ix_alert_rules_user_id ON alert_rules (user_id);
         CREATE INDEX ix_alert_rules_vm_id ON alert_rules (vm_id);
+        CREATE UNIQUE INDEX uq_alert_rules_user_code_active ON alert_rules (user_id, rule_code) WHERE deleted = false;
 
         CREATE TABLE notification_channels (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -204,8 +207,8 @@ def upgrade() -> None:
             receiver VARCHAR(500) NOT NULL,
             config_json JSONB,
             enabled BOOLEAN NOT NULL DEFAULT true,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ,
             deleted BOOLEAN NOT NULL DEFAULT false,
             CONSTRAINT ck_notification_channels_type CHECK (channel_type IN ('EMAIL', 'WEBHOOK', 'TELEGRAM', 'SLACK'))
         );
@@ -216,7 +219,7 @@ def upgrade() -> None:
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             alert_rule_id UUID NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
             channel_id UUID NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT uq_alert_rule_channel UNIQUE (alert_rule_id, channel_id)
         );
 
@@ -232,7 +235,7 @@ def upgrade() -> None:
             request_ip VARCHAR(50),
             user_agent VARCHAR(500),
             detail_json JSONB,
-            created_at TIMESTAMP NOT NULL DEFAULT now()
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
 
         CREATE INDEX ix_audit_logs_user_id ON audit_logs (user_id);
