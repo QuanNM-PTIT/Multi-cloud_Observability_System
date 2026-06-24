@@ -2,6 +2,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.base import TimezoneAwareResponse
+
 
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=100)
@@ -20,12 +22,10 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class CurrentUserResponse(BaseModel):
+class CurrentUserResponse(TimezoneAwareResponse):
     id: UUID
     username: str
     email: EmailStr
     full_name: str | None
     status: str
     grafana_user_id: str | None
-
-    model_config = {"from_attributes": True}

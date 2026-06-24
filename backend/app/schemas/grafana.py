@@ -1,10 +1,10 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from app.schemas.base import TimezoneAwareResponse
 
 
-class GrafanaDashboardResponse(BaseModel):
+class GrafanaDashboardResponse(TimezoneAwareResponse):
     id: UUID
     vm_id: UUID | None
     dashboard_uid: str | None
@@ -14,10 +14,8 @@ class GrafanaDashboardResponse(BaseModel):
     created_at: datetime
     updated_at: datetime | None
 
-    model_config = {"from_attributes": True}
 
-
-class GrafanaPanelResponse(BaseModel):
+class GrafanaPanelResponse(TimezoneAwareResponse):
     id: UUID
     vm_id: UUID | None
     dashboard_uid: str
@@ -27,5 +25,3 @@ class GrafanaPanelResponse(BaseModel):
     iframe_url: str
     is_default: bool
     status: str
-
-    model_config = {"from_attributes": True}

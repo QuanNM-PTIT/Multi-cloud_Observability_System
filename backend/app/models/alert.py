@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,7 +15,7 @@ class AlertRule(UuidPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     vm_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("vm_instances.id", ondelete="CASCADE"), nullable=True, index=True)
     rule_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    rule_code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    rule_code: Mapped[str] = mapped_column(String(100), nullable=False)
     metric_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     promql_expr: Mapped[str] = mapped_column(Text, nullable=False)
     condition_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -41,4 +41,4 @@ class AlertRuleChannel(UuidPrimaryKeyMixin, Base):
 
     alert_rule_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("alert_rules.id", ondelete="CASCADE"), nullable=False, index=True)
     channel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("notification_channels.id", ondelete="CASCADE"), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=text("now()"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

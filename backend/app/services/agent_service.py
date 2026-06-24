@@ -1,4 +1,3 @@
-from datetime import datetime
 from pathlib import Path
 import hashlib
 import secrets
@@ -12,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.security import hash_agent_token
+from app.core.timezone import now_utc
 from app.models.agent import AgentInstallEvent, AgentPackage, AgentToken, VmAgentStatus
 from app.models.user import User
 from app.models.vm import VmInstance
@@ -207,7 +207,7 @@ Run `sudo ./uninstall.sh`.
         )
         for token in active_tokens.scalars().all():
             token.status = "REVOKED"
-            token.revoked_at = datetime.utcnow()
+            token.revoked_at = now_utc()
         await db.flush()
 
         raw_token = AgentService.generate_raw_token()
@@ -278,7 +278,7 @@ Run `sudo ./uninstall.sh`.
         """Mark a package as downloaded and update the VM monitoring lifecycle state."""
         vm = await VmService.get_owned_vm(db, user, package.vm_id)
         package.status = "DOWNLOADED"
-        package.downloaded_at = datetime.utcnow()
+        package.downloaded_at = now_utc()
         vm.monitoring_status = "DOWNLOADED"
         db.add(
             AgentInstallEvent(
@@ -321,7 +321,7 @@ Run `sudo ./uninstall.sh`.
         token = result.scalar_one_or_none()
         if not token:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token")
-        now = datetime.utcnow()
+        now = now_utc()
         if token.expired_at and token.expired_at <= now:
             token.status = "EXPIRED"
             await db.commit()

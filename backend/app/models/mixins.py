@@ -1,9 +1,11 @@
 from datetime import datetime
 import uuid
 
-from sqlalchemy import Boolean, DateTime, text
+from sqlalchemy import Boolean, DateTime, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.timezone import now_utc
 
 
 class UuidPrimaryKeyMixin:
@@ -11,8 +13,8 @@ class UuidPrimaryKeyMixin:
 
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, onupdate=now_utc)
 
 
 class SoftDeleteMixin:

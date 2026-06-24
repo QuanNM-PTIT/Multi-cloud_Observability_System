@@ -1,10 +1,9 @@
-from datetime import datetime
-
 from fastapi import HTTPException, Request, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import create_access_token, hash_password, verify_password
+from app.core.timezone import now_utc
 from app.models.user import User
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 from app.services.audit_service import AuditService
@@ -56,7 +55,7 @@ class AuthService:
         if user.status != "ACTIVE":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is not active")
 
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = now_utc()
         AuditService.add_log(
             db,
             action="LOGIN",

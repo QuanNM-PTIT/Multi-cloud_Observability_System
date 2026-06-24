@@ -1,7 +1,7 @@
 from datetime import datetime
 import uuid
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,9 +16,9 @@ class AgentToken(UuidPrimaryKeyMixin, TimestampMixin, Base):
     token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     token_prefix: Mapped[str | None] = mapped_column(String(30), nullable=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="ACTIVE", server_default=text("'ACTIVE'"))
-    expired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AgentPackage(UuidPrimaryKeyMixin, TimestampMixin, Base):
@@ -34,8 +34,8 @@ class AgentPackage(UuidPrimaryKeyMixin, TimestampMixin, Base):
     os_type: Mapped[str] = mapped_column(String(50), nullable=False)
     agent_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="GENERATED", server_default=text("'GENERATED'"))
-    downloaded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    expired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AgentInstallEvent(UuidPrimaryKeyMixin, Base):
@@ -49,7 +49,7 @@ class AgentInstallEvent(UuidPrimaryKeyMixin, Base):
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_ip: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class VmAgentStatus(UuidPrimaryKeyMixin, Base):
@@ -59,9 +59,9 @@ class VmAgentStatus(UuidPrimaryKeyMixin, Base):
     agent_status: Mapped[str] = mapped_column(String(50), nullable=False, default="UNKNOWN", server_default=text("'UNKNOWN'"))
     agent_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     service_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     vm = relationship("VmInstance", back_populates="agent_status")

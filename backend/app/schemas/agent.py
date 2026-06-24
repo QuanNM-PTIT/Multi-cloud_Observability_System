@@ -3,8 +3,10 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.schemas.base import TimezoneAwareResponse
 
-class AgentPackageResponse(BaseModel):
+
+class AgentPackageResponse(TimezoneAwareResponse):
     vm_id: UUID
     package_id: UUID
     package_name: str
@@ -13,7 +15,7 @@ class AgentPackageResponse(BaseModel):
     file_size_bytes: int | None
 
 
-class AgentStatusResponse(BaseModel):
+class AgentStatusResponse(TimezoneAwareResponse):
     vm_id: UUID
     agent_status: str
     agent_version: str | None
@@ -23,9 +25,7 @@ class AgentStatusResponse(BaseModel):
     last_error_message: str | None
     updated_at: datetime | None
 
-    model_config = {"from_attributes": True}
 
-
-class AgentTokenValidationResponse(BaseModel):
+class AgentTokenValidationResponse(TimezoneAwareResponse):
     valid: bool
     vm_id: UUID

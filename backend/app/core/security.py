@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 import hashlib
 import hmac
 from typing import Any
@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from passlib.context import CryptContext
 
 from app.core.config import get_settings
+from app.core.timezone import now_utc
 
 password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -25,7 +26,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 def create_access_token(subject: str, extra_claims: dict[str, Any] | None = None) -> str:
     """Create a signed JWT access token for an authenticated user."""
     settings = get_settings()
-    expires_at = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
+    expires_at = now_utc() + timedelta(minutes=settings.access_token_expire_minutes)
     payload: dict[str, Any] = {"sub": subject, "exp": expires_at}
     if extra_claims:
         payload.update(extra_claims)

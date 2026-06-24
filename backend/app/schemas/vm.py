@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.base import TimezoneAwareResponse
+
 CloudProvider = Literal["viettel-idc", "aws", "gcp", "azure", "digitalocean", "openstack", "private-cloud"]
 MonitoringStatus = Literal["NOT_INSTALLED", "PACKAGE_GENERATED", "DOWNLOADED", "INSTALLING", "RUNNING", "STOPPED", "ERROR", "NO_DATA"]
 
@@ -32,7 +34,7 @@ class VmUpdateRequest(BaseModel):
     monitoring_status: MonitoringStatus | None = None
 
 
-class VmResponse(BaseModel):
+class VmResponse(TimezoneAwareResponse):
     id: UUID
     vm_name: str
     cloud_provider: str
@@ -48,8 +50,6 @@ class VmResponse(BaseModel):
     created_at: datetime
     updated_at: datetime | None
 
-    model_config = {"from_attributes": True}
 
-
-class VmListResponse(BaseModel):
+class VmListResponse(TimezoneAwareResponse):
     items: list[VmResponse]

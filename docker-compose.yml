@@ -93,6 +93,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       TZ: Asia/Ho_Chi_Minh
+      PGTZ: Asia/Ho_Chi_Minh
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
@@ -119,6 +120,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: Asia/Ho_Chi_Minh
+      APP_TIMEZONE: Asia/Ho_Chi_Minh
 
       APP_PUBLIC_PORTAL_URL: ${PUBLIC_PORTAL_URL}
       APP_PUBLIC_GRAFANA_URL: ${PUBLIC_GRAFANA_URL}
