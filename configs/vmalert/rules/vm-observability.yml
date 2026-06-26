@@ -1,0 +1,12 @@
+groups:
+  - name: vm-observability
+    interval: 30s
+    rules:
+      - alert: InstanceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Instance is down"
+          description: "A monitored target has stopped reporting availability metrics."
