@@ -25,3 +25,18 @@ class GrafanaPanelResponse(TimezoneAwareResponse):
     iframe_url: str
     is_default: bool
     status: str
+
+
+class GrafanaEmbedPanelResponse(TimezoneAwareResponse):
+    key: str
+    title: str
+    panel_id: int
+    iframe_url: str
+    height: int
+
+
+class VmDashboardPanelsResponse(TimezoneAwareResponse):
+    vm_id: UUID
+    host_name: str
+    dashboard_uid: str
+    panels: list[GrafanaEmbedPanelResponse]

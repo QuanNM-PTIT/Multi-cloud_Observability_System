@@ -24,7 +24,10 @@ class Settings(BaseSettings):
     public_grafana_url: str = Field(default="http://localhost:3000", alias="PUBLIC_GRAFANA_URL")
     public_ingest_url: str = Field(default="http://localhost:18080/api/v1/write", alias="PUBLIC_INGEST_URL")
     agent_package_dir: Path = Field(default=Path("/app/packages/agent"), alias="APP_AGENT_PACKAGE_DIR")
+    agent_source_dir: Path = Field(default=Path("/app/packages"), alias="APP_AGENT_SOURCE_DIR")
     grafana_internal_url: str = Field(default="http://grafana:3000", alias="GRAFANA_INTERNAL_URL")
+    grafana_admin_user: str = Field(default="admin", alias="GRAFANA_ADMIN_USER")
+    grafana_admin_password: str = Field(default="admin", alias="GRAFANA_ADMIN_PASSWORD")
     victoriametrics_internal_url: str = Field(default="http://victoriametrics:8428", alias="VICTORIAMETRICS_INTERNAL_URL")
     alertmanager_internal_url: str = Field(default="http://vmalertmanager:9093", alias="ALERTMANAGER_INTERNAL_URL")
 

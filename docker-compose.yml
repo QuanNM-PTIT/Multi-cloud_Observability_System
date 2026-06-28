@@ -34,7 +34,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_SECURITY_ALLOW_EMBEDDING: "true"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
-      GF_SERVER_ROOT_URL: "https://grafana.lcdkhoacntt1.dev/"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL}
     volumes:
       - ./data/grafana:/var/lib/grafana
       - ./configs/grafana/provisioning:/etc/grafana/provisioning
@@ -87,7 +87,7 @@ services:
     container_name: observability-postgres
     restart: unless-stopped
     env_file:
-      - .env
+      - ${APP_ENV_FILE:-.env}
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -113,7 +113,7 @@ services:
     profiles:
       - app
     env_file:
-      - .env
+      - ${APP_ENV_FILE:-.env}
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -131,6 +131,7 @@ services:
       PUBLIC_INGEST_URL: ${PUBLIC_INGEST_URL}
 
       APP_AGENT_PACKAGE_DIR: /app/packages/agent
+      APP_AGENT_SOURCE_DIR: /app/packages
       JWT_SECRET: ${JWT_SECRET}
       SERVER_SECRET: ${SERVER_SECRET}
 
@@ -138,7 +139,7 @@ services:
       VICTORIAMETRICS_INTERNAL_URL: http://victoriametrics:8428
       ALERTMANAGER_INTERNAL_URL: http://vmalertmanager:9093
     volumes:
-      - ./packages/agent:/app/packages/agent
+      - ./packages:/app/packages
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -160,8 +161,8 @@ services:
     profiles:
       - app
     environment:
-      VITE_API_BASE_URL: https://portal.lcdkhoacntt1.dev/api
-      VITE_GRAFANA_BASE_URL: https://grafana.lcdkhoacntt1.dev
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+      VITE_GRAFANA_BASE_URL: ${VITE_GRAFANA_BASE_URL}
     ports:
       - "127.0.0.1:8081:80"
     depends_on:

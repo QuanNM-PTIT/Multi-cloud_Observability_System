@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.agent import AgentPackageResponse, AgentStatusResponse
-from app.schemas.grafana import GrafanaDashboardResponse, GrafanaPanelResponse
+from app.schemas.agent import AgentPackageResponse, AgentScriptResponse, AgentStatusResponse
+from app.schemas.grafana import GrafanaDashboardResponse, GrafanaPanelResponse, VmDashboardPanelsResponse
 from app.schemas.vm import VmCreateRequest, VmListResponse, VmResponse, VmUpdateRequest
 from app.services.agent_service import AgentService
 from app.services.grafana_service import GrafanaService
@@ -76,6 +76,17 @@ async def generate_agent_package(
     return await AgentService.generate_package(db, current_user, vm_id, request)
 
 
+@router.post("/{vm_id}/agent-uninstall-script", response_model=AgentScriptResponse)
+async def generate_agent_uninstall_script(
+    vm_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AgentScriptResponse:
+    """Generate a time-limited uninstall script for one VM."""
+    return await AgentService.generate_uninstall_script(db, current_user, vm_id, request)
+
+
 @router.get("/{vm_id}/agent-package/download")
 async def download_agent_package(
     vm_id: UUID,
@@ -89,7 +100,7 @@ async def download_agent_package(
     return FileResponse(
         path=Path(package.package_path),
         filename=package.package_name,
-        media_type="application/zip",
+        media_type=AgentService.media_type_for_package(package.package_name),
     )
 
 
@@ -121,3 +132,13 @@ async def list_dashboard_panels(
 ) -> list:
     """Return stored Grafana iframe panel mappings for one VM."""
     return await GrafanaService.list_dashboard_panels(db, current_user, vm_id)
+
+
+@router.get("/{vm_id}/dashboard-panels", response_model=VmDashboardPanelsResponse)
+async def get_vm_dashboard_panels(
+    vm_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> VmDashboardPanelsResponse:
+    """Return generated Grafana d-solo iframe panels for one owned VM."""
+    return await GrafanaService.get_vm_dashboard_panels(db, current_user, vm_id)

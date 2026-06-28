@@ -21,6 +21,22 @@ class AgentToken(UuidPrimaryKeyMixin, TimestampMixin, Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class AgentScriptToken(UuidPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "agent_script_tokens"
+
+    vm_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("vm_instances.id", ondelete="CASCADE"), nullable=False, index=True)
+    package_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_packages.id", ondelete="SET NULL"), nullable=True, index=True)
+    token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    token_prefix: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    action: Mapped[str] = mapped_column(String(30), nullable=False)
+    os_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="ACTIVE", server_default=text("'ACTIVE'"))
+    expired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AgentPackage(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "agent_packages"
 

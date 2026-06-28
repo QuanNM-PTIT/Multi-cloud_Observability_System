@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, health, internal, vms
+from app.api import agent_scripts, auth, health, internal, vms
 from app.core.config import get_settings
 
 
@@ -19,6 +19,7 @@ def create_app() -> FastAPI:
     application.include_router(health.router, prefix=settings.api_prefix)
     application.include_router(auth.router, prefix=settings.api_prefix)
     application.include_router(vms.router, prefix=settings.api_prefix)
+    application.include_router(agent_scripts.router, prefix=settings.api_prefix)
     application.include_router(internal.router)
     return application
 

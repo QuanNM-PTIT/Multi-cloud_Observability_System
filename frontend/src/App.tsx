@@ -5,8 +5,8 @@ import {
   CheckCircle2,
   ChevronDown,
   Cloud,
+  Copy,
   Cpu,
-  Download,
   Gauge,
   HardDrive,
   KeyRound,
@@ -60,7 +60,7 @@ type VmFormState = {
   public_ip: string;
   private_ip: string;
   os_type: string;
-  os_version: string;
+  os_other: string;
   environment: string;
   description: string;
 };
@@ -72,6 +72,18 @@ type AgentPackage = {
   download_url: string;
   checksum: string | null;
   file_size_bytes: number | null;
+  action: string | null;
+  script: string | null;
+  script_token_expires_at: string | null;
+  expires_in_seconds: number | null;
+};
+
+type AgentScript = {
+  vm_id: string;
+  action: string;
+  script: string;
+  script_token_expires_at: string;
+  expires_in_seconds: number;
 };
 
 type AgentStatus = {
@@ -85,6 +97,21 @@ type AgentStatus = {
   updated_at: string | null;
 };
 
+type GrafanaEmbedPanel = {
+  key: string;
+  title: string;
+  panel_id: number;
+  iframe_url: string;
+  height: number;
+};
+
+type VmDashboardPanels = {
+  vm_id: string;
+  host_name: string;
+  dashboard_uid: string;
+  panels: GrafanaEmbedPanel[];
+};
+
 type Notice = {
   type: "success" | "error" | "info";
   message: string;
@@ -95,20 +122,38 @@ const emptyVmForm: VmFormState = {
   cloud_provider: "digitalocean",
   public_ip: "",
   private_ip: "",
-  os_type: "linux",
-  os_version: "Ubuntu 24.04",
+  os_type: "Ubuntu",
+  os_other: "",
   environment: "dev",
   description: ""
 };
 
 const cloudOptions = [
-  "digitalocean",
-  "aws",
-  "gcp",
-  "azure",
-  "viettel-idc",
-  "openstack",
-  "private-cloud"
+  { value: "aws", label: "AWS" },
+  { value: "gcp", label: "Google Cloud Platform" },
+  { value: "azure", label: "Microsoft Azure" },
+  { value: "digitalocean", label: "DigitalOcean" },
+  { value: "viettel-idc", label: "Viettel IDC" },
+  { value: "openstack", label: "OpenStack" },
+  { value: "private-cloud", label: "Private Cloud" },
+  { value: "other", label: "Other" }
+];
+
+const osOptions = [
+  "Linux",
+  "Ubuntu",
+  "Debian",
+  "Red Hat Enterprise Linux",
+  "CentOS Stream",
+  "Rocky Linux",
+  "AlmaLinux",
+  "Amazon Linux",
+  "Oracle Linux",
+  "SUSE Linux Enterprise Server",
+  "Windows",
+  "Windows Server 2022",
+  "Windows Server 2019",
+  "Other"
 ];
 
 const statusLabels: Record<string, string> = {
@@ -181,6 +226,11 @@ function formatBytes(value: number | null): string {
   return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function isVmInstalled(vm: Vm): boolean {
+  /* Return whether uninstall actions should be available for a VM. */
+  return vm.is_monitoring || vm.monitoring_status === "RUNNING";
+}
+
 function statusTone(status: string): "green" | "red" | "amber" | "gray" {
   /* Map backend monitoring states to compact visual status tones. */
   if (status === "RUNNING") {
@@ -197,15 +247,36 @@ function statusTone(status: string): "green" | "red" | "amber" | "gray" {
 
 function toPayload(form: VmFormState): Record<string, string | null> {
   /* Convert VM form state into the backend create or update payload. */
+  const osType = form.os_type === "Other" ? form.os_other.trim() : form.os_type;
   return {
     vm_name: form.vm_name.trim(),
     cloud_provider: form.cloud_provider,
     public_ip: form.public_ip.trim() || null,
     private_ip: form.private_ip.trim() || null,
-    os_type: form.os_type.trim(),
-    os_version: form.os_version.trim() || null,
+    os_type: osType.trim(),
+    os_version: null,
     environment: form.environment.trim() || null,
     description: form.description.trim() || null
+  };
+}
+
+function formatCloudProvider(provider: string): string {
+  /* Convert stored cloud provider codes into readable UI labels. */
+  return cloudOptions.find((option) => option.value === provider)?.label || provider;
+}
+
+function createVmFormFromVm(vm: Vm): VmFormState {
+  /* Convert a VM record into form state while preserving custom OS values. */
+  const knownOs = osOptions.includes(vm.os_type);
+  return {
+    vm_name: vm.vm_name,
+    cloud_provider: cloudOptions.some((option) => option.value === vm.cloud_provider) ? vm.cloud_provider : "other",
+    public_ip: vm.public_ip || "",
+    private_ip: vm.private_ip || "",
+    os_type: knownOs ? vm.os_type : "Other",
+    os_other: knownOs ? "" : vm.os_type,
+    environment: vm.environment || "",
+    description: vm.description || ""
   };
 }
 
@@ -445,6 +516,9 @@ function VmModal({
   function submit(event: FormEvent<HTMLFormElement>) {
     /* Validate and submit the VM form state. */
     event.preventDefault();
+    if (form.os_type === "Other" && !form.os_other.trim()) {
+      return;
+    }
     onSubmit(form);
   }
 
@@ -466,7 +540,7 @@ function VmModal({
           <label>
             Cloud provider
             <select value={form.cloud_provider} onChange={(event) => setForm({ ...form, cloud_provider: event.target.value })}>
-              {cloudOptions.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
+              {cloudOptions.map((provider) => <option key={provider.value} value={provider.value}>{provider.label}</option>)}
             </select>
           </label>
           <label>
@@ -478,13 +552,22 @@ function VmModal({
             <input value={form.private_ip} onChange={(event) => setForm({ ...form, private_ip: event.target.value })} />
           </label>
           <label>
-            OS type
-            <input value={form.os_type} onChange={(event) => setForm({ ...form, os_type: event.target.value })} required />
+            Operating system
+            <select value={form.os_type} onChange={(event) => setForm({ ...form, os_type: event.target.value })} required>
+              {osOptions.map((os) => <option key={os} value={os}>{os}</option>)}
+            </select>
           </label>
-          <label>
-            OS version
-            <input value={form.os_version} onChange={(event) => setForm({ ...form, os_version: event.target.value })} />
-          </label>
+          {form.os_type === "Other" && (
+            <label>
+              OS information
+              <input
+                value={form.os_other}
+                onChange={(event) => setForm({ ...form, os_other: event.target.value })}
+                placeholder="Enter operating system"
+                required
+              />
+            </label>
+          )}
           <label>
             Environment
             <input value={form.environment} onChange={(event) => setForm({ ...form, environment: event.target.value })} />
@@ -505,17 +588,21 @@ function VmModal({
 
 function VmTable({
   vms,
+  selectedVmId,
+  onSelect,
   onEdit,
   onDelete,
   onGenerate,
-  onDownload,
+  onGenerateUninstall,
   busyId
 }: {
   vms: Vm[];
+  selectedVmId: string | null;
+  onSelect: (vm: Vm) => void;
   onEdit: (vm: Vm) => void;
   onDelete: (vm: Vm) => void;
   onGenerate: (vm: Vm) => void;
-  onDownload: (vm: Vm) => void;
+  onGenerateUninstall: (vm: Vm) => void;
   busyId: string | null;
 }) {
   /* Render the VM inventory table with monitoring actions. */
@@ -543,18 +630,18 @@ function VmTable({
         </thead>
         <tbody>
           {vms.map((vm) => (
-            <tr key={vm.id}>
+            <tr key={vm.id} className={selectedVmId === vm.id ? "selected-row" : ""} onClick={() => onSelect(vm)}>
               <td>
                 <div className="vm-name-cell">
                   <span className="server-dot"><Server size={17} /></span>
                   <div>
                     <strong>{vm.vm_name}</strong>
-                    <small>{vm.os_type}{vm.os_version ? ` / ${vm.os_version}` : ""}</small>
+                    <small>{vm.os_type}</small>
                   </div>
                 </div>
               </td>
               <td>
-                <span className="provider-pill"><Cloud size={14} />{vm.cloud_provider}</span>
+                <span className="provider-pill"><Cloud size={14} />{formatCloudProvider(vm.cloud_provider)}</span>
               </td>
               <td>
                 <div className="network-cell">
@@ -570,16 +657,16 @@ function VmTable({
               <td>{formatDate(vm.last_seen_at)}</td>
               <td>
                 <div className="row-actions">
-                  <button title="Generate package" onClick={() => onGenerate(vm)} disabled={busyId === vm.id}>
+                  <button title="Generate package" onClick={(event) => { event.stopPropagation(); onGenerate(vm); }} disabled={busyId === vm.id}>
                     <PackageCheck size={17} />
                   </button>
-                  <button title="Download package" onClick={() => onDownload(vm)} disabled={busyId === vm.id}>
-                    <Download size={17} />
+                  <button title="Generate uninstall script" onClick={(event) => { event.stopPropagation(); onGenerateUninstall(vm); }} disabled={busyId === vm.id || !isVmInstalled(vm)}>
+                    <ShieldCheck size={17} />
                   </button>
-                  <button title="Edit VM" onClick={() => onEdit(vm)} disabled={busyId === vm.id}>
+                  <button title="Edit VM" onClick={(event) => { event.stopPropagation(); onEdit(vm); }} disabled={busyId === vm.id}>
                     <Gauge size={17} />
                   </button>
-                  <button title="Delete VM" className="danger-icon" onClick={() => onDelete(vm)} disabled={busyId === vm.id}>
+                  <button title="Delete VM" className="danger-icon" onClick={(event) => { event.stopPropagation(); onDelete(vm); }} disabled={busyId === vm.id}>
                     <Trash2 size={17} />
                   </button>
                 </div>
@@ -589,6 +676,152 @@ function VmTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function GrafanaPanel({ title, iframeUrl, height }: { title: string; iframeUrl: string; height: number }) {
+  /* Render one Grafana iframe panel with a portal-side loading skeleton. */
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    setLoaded(false);
+  }, [iframeUrl]);
+
+  function handleLoad() {
+    /* Delay the iframe reveal so Grafana's own loading badge stays hidden behind the portal loader. */
+    window.setTimeout(() => setLoaded(true), 500);
+  }
+
+  return (
+    <article className="grafana-panel-card">
+      <div className="grafana-panel-title">
+        <span>{title}</span>
+      </div>
+      <div className="grafana-frame-wrap" style={{ height }}>
+        {!loaded && (
+          <div className="grafana-loader" aria-label={`Loading ${title}`}>
+            <div className="grafana-loader-grid">
+              <span />
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className="grafana-loader-lines">
+              <i />
+              <i />
+              <i />
+            </div>
+          </div>
+        )}
+        <iframe
+          className={loaded ? "loaded" : ""}
+          title={title}
+          src={iframeUrl}
+          width="100%"
+          height="100%"
+          frameBorder="0"
+          loading="lazy"
+          onLoad={handleLoad}
+        />
+      </div>
+    </article>
+  );
+}
+
+function VmMonitoringPage({
+  vm,
+  vms,
+  token,
+  onSelectVm
+}: {
+  vm: Vm | null;
+  vms: Vm[];
+  token: string;
+  onSelectVm: (vmId: string) => void;
+}) {
+  /* Load and render backend-generated Grafana d-solo panels for a selected VM. */
+  const [dashboard, setDashboard] = useState<VmDashboardPanels | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadPanels() {
+    /* Fetch Grafana iframe panel URLs for the selected VM from the backend. */
+    if (!vm) {
+      setDashboard(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiRequest<VmDashboardPanels>(`/vms/${vm.id}/dashboard-panels`, {}, token);
+      setDashboard(data);
+    } catch (loadError) {
+      setDashboard(null);
+      setError(loadError instanceof Error ? loadError.message : "Could not load Grafana panels");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadPanels();
+  }, [vm?.id]);
+
+  if (!vm) {
+    return (
+      <section className="monitoring-page">
+        <div className="empty-state">
+          <BarChart3 size={34} />
+          <h3>No VM selected</h3>
+          <p>Add or select a VM to view monitoring panels.</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="monitoring-page">
+      <div className="monitoring-header">
+        <div>
+          <span className="eyebrow">Grafana embedded panels</span>
+          <h2>{vm.vm_name}</h2>
+          <p>Dashboard UID: {dashboard?.dashboard_uid || "masterptit-vm-observability"}</p>
+        </div>
+        <div className="monitoring-meta">
+          <label className="monitoring-vm-select">
+            <span>VM</span>
+            <select value={vm.id} onChange={(event) => onSelectVm(event.target.value)}>
+              {vms.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.vm_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Badge tone={statusTone(vm.monitoring_status)}>
+            {statusLabels[vm.monitoring_status] || vm.monitoring_status}
+          </Badge>
+          <Button variant="secondary" size="sm" onClick={loadPanels}>
+            <RefreshCcw size={16} />Refresh panels
+          </Button>
+        </div>
+      </div>
+
+      {loading && <div className="loading-line">Loading Grafana panels...</div>}
+      {error && <NoticeBar notice={{ type: "error", message: error }} onClose={() => setError(null)} />}
+      {!loading && !error && dashboard && (
+        <div className="grafana-grid">
+          {dashboard.panels.map((panel) => (
+            <GrafanaPanel
+              key={panel.key}
+              title={panel.title}
+              iframeUrl={panel.iframe_url}
+              height={panel.height}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -605,7 +838,7 @@ function AppShell({
   const [vms, setVms] = useState<Vm[]>([]);
   const [selectedVmId, setSelectedVmId] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
-  const [latestPackage, setLatestPackage] = useState<AgentPackage | null>(null);
+  const [latestScript, setLatestScript] = useState<(AgentScript & { package_name?: string; file_size_bytes?: number | null }) | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -613,6 +846,7 @@ function AppShell({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "running" | "attention">("all");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [page, setPage] = useState<"dashboard" | "grafana">("dashboard");
   const [modalState, setModalState] = useState<{ vm?: Vm; form: VmFormState } | null>(null);
 
   const selectedVm = useMemo(() => vms.find((vm) => vm.id === selectedVmId) || vms[0] || null, [selectedVmId, vms]);
@@ -620,7 +854,7 @@ function AppShell({
   const filteredVms = useMemo(() => {
     /* Apply search and status filters to VM inventory rows. */
     return vms.filter((vm) => {
-      const text = `${vm.vm_name} ${vm.cloud_provider} ${vm.environment || ""} ${vm.public_ip || ""}`.toLowerCase();
+      const text = `${vm.vm_name} ${vm.cloud_provider} ${formatCloudProvider(vm.cloud_provider)} ${vm.os_type} ${vm.environment || ""} ${vm.public_ip || ""}`.toLowerCase();
       const matchesQuery = text.includes(query.toLowerCase());
       const matchesFilter =
         filter === "all" ||
@@ -707,12 +941,22 @@ function AppShell({
   }
 
   async function generatePackage(vm: Vm) {
-    /* Generate a new agent package for the selected VM. */
+    /* Generate a package and VM-side install script for the selected VM. */
     setBusyId(vm.id);
     try {
       const data = await apiRequest<AgentPackage>(`/vms/${vm.id}/agent-package`, { method: "POST" }, token);
-      setLatestPackage(data);
-      setNotice({ type: "success", message: `Generated ${data.package_name}` });
+      if (data.script && data.script_token_expires_at) {
+        setLatestScript({
+          vm_id: data.vm_id,
+          action: data.action || "INSTALL",
+          script: data.script,
+          script_token_expires_at: data.script_token_expires_at,
+          expires_in_seconds: data.expires_in_seconds || 900,
+          package_name: data.package_name,
+          file_size_bytes: data.file_size_bytes,
+        });
+      }
+      setNotice({ type: "success", message: `Generated install script for ${vm.vm_name}` });
       await loadVms();
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not generate package" });
@@ -721,49 +965,32 @@ function AppShell({
     }
   }
 
-  async function downloadPackage(vm: Vm) {
-    /* Download the latest agent package using an authenticated request. */
+  async function generateUninstallScript(vm: Vm) {
+    /* Generate a VM-side uninstall script for an installed agent. */
     setBusyId(vm.id);
     try {
-      const response = await fetch(`${API_BASE_URL}/vms/${vm.id}/agent-package/download`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!response.ok) {
-        throw new Error(`Download failed with status ${response.status}`);
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get("content-disposition") || "";
-      const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || `agent-package-${vm.id}.zip`;
-      const objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = filename;
-      anchor.click();
-      URL.revokeObjectURL(objectUrl);
-      setNotice({ type: "success", message: `Downloaded ${filename}` });
-      await loadVms();
+      const data = await apiRequest<AgentScript>(`/vms/${vm.id}/agent-uninstall-script`, { method: "POST" }, token);
+      setLatestScript(data);
+      setNotice({ type: "success", message: `Generated uninstall script for ${vm.vm_name}` });
     } catch (error) {
-      setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not download package" });
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not generate uninstall script" });
     } finally {
       setBusyId(null);
     }
   }
 
+  async function copyLatestScript() {
+    /* Copy the latest generated VM-side script to the clipboard. */
+    if (!latestScript?.script) {
+      return;
+    }
+    await navigator.clipboard.writeText(latestScript.script);
+    setNotice({ type: "success", message: "Script copied to clipboard" });
+  }
+
   function editVm(vm: Vm) {
     /* Open the VM modal with fields populated from an existing VM. */
-    setModalState({
-      vm,
-      form: {
-        vm_name: vm.vm_name,
-        cloud_provider: vm.cloud_provider,
-        public_ip: vm.public_ip || "",
-        private_ip: vm.private_ip || "",
-        os_type: vm.os_type,
-        os_version: vm.os_version || "",
-        environment: vm.environment || "",
-        description: vm.description || ""
-      }
-    });
+    setModalState({ vm, form: createVmFormFromVm(vm) });
   }
 
   useEffect(() => {
@@ -789,10 +1016,8 @@ function AppShell({
           </div>
         </div>
         <nav>
-          <a className="active"><LayoutDashboard size={18} />Dashboard</a>
-          <a><Server size={18} />VM Inventory</a>
-          <a><BarChart3 size={18} />Grafana</a>
-          <a><ShieldCheck size={18} />Audit</a>
+          <button className={page === "dashboard" ? "active" : ""} onClick={() => setPage("dashboard")}><LayoutDashboard size={18} />Dashboard</button>
+          <button className={page === "grafana" ? "active" : ""} onClick={() => setPage("grafana")}><BarChart3 size={18} />Monitoring</button>
         </nav>
         <div className="sidebar-footer">
           <div className="user-chip">
@@ -811,7 +1036,7 @@ function AppShell({
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)}><Menu size={20} /></Button>
           <div>
             <span className="eyebrow">Multi-cloud VM monitoring</span>
-            <h1>Operations Dashboard</h1>
+            <h1>{page === "grafana" ? "VM Monitoring" : "Operations Dashboard"}</h1>
           </div>
           <div className="topbar-actions">
             <Button variant="secondary" onClick={loadVms}><RefreshCcw size={17} />Refresh</Button>
@@ -821,98 +1046,123 @@ function AppShell({
 
         <NoticeBar notice={notice} onClose={() => setNotice(null)} />
 
-        <section className="stats-grid">
-          <StatCard label="Total VMs" value={stats.total} helper="Registered inventory" icon={<Server size={22} />} />
-          <StatCard label="Running" value={stats.running} helper="Healthy agents" icon={<CheckCircle2 size={22} />} />
-          <StatCard label="Needs attention" value={stats.attention} helper="Stopped, error, no data" icon={<AlertTriangle size={22} />} />
-          <StatCard label="Packages" value={stats.packages} helper="Generated or downloaded" icon={<PackageCheck size={22} />} />
-        </section>
+        {page === "dashboard" ? (
+          <>
+            <section className="stats-grid">
+              <StatCard label="Total VMs" value={stats.total} helper="Registered inventory" icon={<Server size={22} />} />
+              <StatCard label="Running" value={stats.running} helper="Healthy agents" icon={<CheckCircle2 size={22} />} />
+              <StatCard label="Needs attention" value={stats.attention} helper="Stopped, error, no data" icon={<AlertTriangle size={22} />} />
+              <StatCard label="Packages" value={stats.packages} helper="Generated or downloaded" icon={<PackageCheck size={22} />} />
+            </section>
 
-        <section className="workspace-grid">
-          <article className="inventory-panel">
-            <div className="panel-header">
-              <div>
-                <span className="eyebrow">Inventory</span>
-                <h2>Virtual Machines</h2>
-              </div>
-              <div className="search-box">
-                <Search size={17} />
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search VM, provider, IP" />
-              </div>
-            </div>
-            <div className="segmented">
-              <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>All</button>
-              <button className={filter === "running" ? "active" : ""} onClick={() => setFilter("running")}>Running</button>
-              <button className={filter === "attention" ? "active" : ""} onClick={() => setFilter("attention")}>Attention</button>
-            </div>
-            {loading ? <div className="loading-line">Loading inventory...</div> : (
-              <VmTable
-                vms={filteredVms}
-                onEdit={editVm}
-                onDelete={deleteVm}
-                onGenerate={generatePackage}
-                onDownload={downloadPackage}
-                busyId={busyId}
-              />
-            )}
-          </article>
-
-          <aside className="detail-panel">
-            <div className="panel-header compact-header">
-              <div>
-                <span className="eyebrow">Selected VM</span>
-                <h2>{selectedVm?.vm_name || "No VM selected"}</h2>
-              </div>
-              <ChevronDown size={18} />
-            </div>
-            {selectedVm ? (
-              <>
-                <div className="status-card">
-                  <Badge tone={statusTone(selectedVm.monitoring_status)}>
-                    {statusLabels[selectedVm.monitoring_status] || selectedVm.monitoring_status}
-                  </Badge>
-                  <strong>{selectedVm.cloud_provider}</strong>
-                  <span>{selectedVm.environment || "default"}</span>
-                </div>
-                <div className="metric-stack">
-                  <div><Cpu size={18} /><span>OS</span><strong>{selectedVm.os_version || selectedVm.os_type}</strong></div>
-                  <div><Network size={18} /><span>Public IP</span><strong>{selectedVm.public_ip || "N/A"}</strong></div>
-                  <div><HardDrive size={18} /><span>Last seen</span><strong>{formatDate(selectedVm.last_seen_at)}</strong></div>
-                </div>
-                <div className="agent-panel">
+            <section className="workspace-grid">
+              <article className="inventory-panel">
+                <div className="panel-header">
                   <div>
-                    <span className="eyebrow">Agent status</span>
-                    <h3>{agentStatus?.agent_status || "UNKNOWN"}</h3>
+                    <span className="eyebrow">Inventory</span>
+                    <h2>Virtual Machines</h2>
                   </div>
-                  <small>Heartbeat: {formatDate(agentStatus?.last_heartbeat_at || null)}</small>
-                  <small>Service: {agentStatus?.service_status || "unknown"}</small>
+                  <div className="search-box">
+                    <Search size={17} />
+                    <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search VM, provider, IP" />
+                  </div>
                 </div>
-                {latestPackage?.vm_id === selectedVm.id && (
-                  <div className="package-card">
-                    <PackageCheck size={20} />
-                    <div>
-                      <strong>{latestPackage.package_name}</strong>
-                      <small>{formatBytes(latestPackage.file_size_bytes)}</small>
+                <div className="segmented">
+                  <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>All</button>
+                  <button className={filter === "running" ? "active" : ""} onClick={() => setFilter("running")}>Running</button>
+                  <button className={filter === "attention" ? "active" : ""} onClick={() => setFilter("attention")}>Attention</button>
+                </div>
+                {loading ? <div className="loading-line">Loading inventory...</div> : (
+                  <VmTable
+                    vms={filteredVms}
+                    selectedVmId={selectedVm?.id || null}
+                    onSelect={(vm) => setSelectedVmId(vm.id)}
+                    onEdit={editVm}
+                    onDelete={deleteVm}
+                    onGenerate={generatePackage}
+                    onGenerateUninstall={generateUninstallScript}
+                    busyId={busyId}
+                  />
+                )}
+              </article>
+
+              <aside className="detail-panel">
+                <div className="panel-header compact-header">
+                  <div>
+                    <span className="eyebrow">Selected VM</span>
+                    <h2>{selectedVm?.vm_name || "No VM selected"}</h2>
+                  </div>
+                  <ChevronDown size={18} />
+                </div>
+                {selectedVm ? (
+                  <>
+                    <div className="status-card">
+                      <Badge tone={statusTone(selectedVm.monitoring_status)}>
+                        {statusLabels[selectedVm.monitoring_status] || selectedVm.monitoring_status}
+                      </Badge>
+                      <strong>{formatCloudProvider(selectedVm.cloud_provider)}</strong>
+                      <span>{selectedVm.environment || "default"}</span>
                     </div>
+                    <div className="metric-stack">
+                      <div><Cpu size={18} /><span>OS</span><strong>{selectedVm.os_type}</strong></div>
+                      <div><Network size={18} /><span>Public IP</span><strong>{selectedVm.public_ip || "N/A"}</strong></div>
+                      <div><HardDrive size={18} /><span>Last seen</span><strong>{formatDate(selectedVm.last_seen_at)}</strong></div>
+                    </div>
+                    <div className="agent-panel">
+                      <div>
+                        <span className="eyebrow">Agent status</span>
+                        <h3>{agentStatus?.agent_status || "UNKNOWN"}</h3>
+                      </div>
+                      <small>Heartbeat: {formatDate(agentStatus?.last_heartbeat_at || null)}</small>
+                      <small>Service: {agentStatus?.service_status || "unknown"}</small>
+                    </div>
+                    {latestScript?.vm_id === selectedVm.id && (
+                      <div className="script-card">
+                        <div className="script-card-header">
+                          <div>
+                            <span className="eyebrow">{latestScript.action === "UNINSTALL" ? "Uninstall script" : "Install script"}</span>
+                            <strong>{latestScript.package_name || "VM-side command"}</strong>
+                            <small>
+                              Expires at {formatDate(latestScript.script_token_expires_at)}
+                              {latestScript.file_size_bytes ? ` / ${formatBytes(latestScript.file_size_bytes)}` : ""}
+                            </small>
+                          </div>
+                          <Button variant="secondary" size="sm" onClick={copyLatestScript}>
+                            <Copy size={16} />Copy
+                          </Button>
+                        </div>
+                        <textarea readOnly value={latestScript.script} aria-label="Generated one-line VM command" />
+                      </div>
+                    )}
+                    <div className="detail-actions">
+                      <Button onClick={() => generatePackage(selectedVm)} disabled={busyId === selectedVm.id}>
+                        <PackageCheck size={17} />Generate install script
+                      </Button>
+                      <Button variant="secondary" onClick={() => generateUninstallScript(selectedVm)} disabled={busyId === selectedVm.id || !isVmInstalled(selectedVm)}>
+                        <ShieldCheck size={17} />Generate uninstall script
+                      </Button>
+                      <Button variant="secondary" onClick={() => setPage("grafana")}>
+                        <BarChart3 size={17} />Open monitoring
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="empty-state side-empty">
+                    <Activity size={32} />
+                    <h3>No selection</h3>
                   </div>
                 )}
-                <div className="detail-actions">
-                  <Button onClick={() => generatePackage(selectedVm)} disabled={busyId === selectedVm.id}>
-                    <PackageCheck size={17} />Generate package
-                  </Button>
-                  <Button variant="secondary" onClick={() => downloadPackage(selectedVm)} disabled={busyId === selectedVm.id}>
-                    <Download size={17} />Download
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <div className="empty-state side-empty">
-                <Activity size={32} />
-                <h3>No selection</h3>
-              </div>
-            )}
-          </aside>
-        </section>
+              </aside>
+            </section>
+          </>
+        ) : (
+          <VmMonitoringPage
+            vm={selectedVm}
+            vms={vms}
+            token={token}
+            onSelectVm={(vmId) => setSelectedVmId(vmId)}
+          />
+        )}
       </main>
 
       {modalState && (

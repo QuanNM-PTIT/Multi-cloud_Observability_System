@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas.base import TimezoneAwareResponse
 
-CloudProvider = Literal["viettel-idc", "aws", "gcp", "azure", "digitalocean", "openstack", "private-cloud"]
+CloudProvider = Literal["viettel-idc", "aws", "gcp", "azure", "digitalocean", "openstack", "private-cloud", "other"]
 MonitoringStatus = Literal["NOT_INSTALLED", "PACKAGE_GENERATED", "DOWNLOADED", "INSTALLING", "RUNNING", "STOPPED", "ERROR", "NO_DATA"]
 
 

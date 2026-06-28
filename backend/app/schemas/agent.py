@@ -13,6 +13,18 @@ class AgentPackageResponse(TimezoneAwareResponse):
     download_url: str
     checksum: str | None
     file_size_bytes: int | None
+    action: str | None = None
+    script: str | None = None
+    script_token_expires_at: datetime | None = None
+    expires_in_seconds: int | None = None
+
+
+class AgentScriptResponse(TimezoneAwareResponse):
+    vm_id: UUID
+    action: str
+    script: str
+    script_token_expires_at: datetime
+    expires_in_seconds: int
 
 
 class AgentStatusResponse(TimezoneAwareResponse):
