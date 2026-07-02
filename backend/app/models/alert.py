@@ -33,6 +33,12 @@ class NotificationChannel(UuidPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, 
     receiver: Mapped[str] = mapped_column(String(500), nullable=False)
     config_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    verification_status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING", server_default=text("'PENDING'"))
+    verification_code_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    verification_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_verification_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_verification_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AlertRuleChannel(UuidPrimaryKeyMixin, Base):

@@ -50,3 +50,10 @@ def hash_agent_token(raw_token: str) -> str:
     """Hash an agent token with HMAC-SHA256 so raw tokens are never stored."""
     settings = get_settings()
     return hmac.new(settings.server_secret.encode(), raw_token.encode(), hashlib.sha256).hexdigest()
+
+
+def hash_receiver_otp(receiver_id: str, otp: str) -> str:
+    """Hash a receiver verification OTP so only a one-way value is stored."""
+    settings = get_settings()
+    payload = f"{receiver_id}:{otp}".encode()
+    return hmac.new(settings.server_secret.encode(), payload, hashlib.sha256).hexdigest()

@@ -2,6 +2,7 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  BellRing,
   CheckCircle2,
   ChevronDown,
   Cloud,
@@ -11,17 +12,21 @@ import {
   HardDrive,
   KeyRound,
   LayoutDashboard,
+  Link2,
   LogOut,
   Menu,
   Network,
   PackageCheck,
+  Pencil,
   Plus,
   RefreshCcw,
   Search,
   Server,
   ShieldCheck,
+  Send,
   Trash2,
   UserPlus,
+  Webhook,
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
@@ -112,10 +117,62 @@ type VmDashboardPanels = {
   panels: GrafanaEmbedPanel[];
 };
 
+type AlertReceiver = {
+  id: string;
+  receiver_name: string;
+  receiver_type: string;
+  webhook_url: string;
+  enabled: boolean;
+  alert_resend_interval_minutes: number;
+  verification_status: "PENDING" | "VERIFIED" | "FAILED";
+  verification_expires_at: string | null;
+  verified_at: string | null;
+  last_verification_sent_at: string | null;
+  last_verification_error: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+type AlertRule = {
+  id: string;
+  vm_id: string | null;
+  rule_name: string;
+  rule_code: string;
+  metric_name: string | null;
+  promql_expr: string;
+  condition_text: string | null;
+  duration: string;
+  severity: "info" | "warning" | "critical";
+  enabled: boolean;
+  receiver_ids: string[];
+  created_at: string;
+  updated_at: string | null;
+};
+
+type ReceiverFormState = {
+  receiver_name: string;
+  webhook_url: string;
+  alert_resend_interval_minutes: number;
+};
+
+type AlertRuleFormState = {
+  rule_name: string;
+  vm_id: string;
+  metric_name: string;
+  comparison_operator: ">" | ">=" | "<=" | "<";
+  threshold: number;
+  duration_minutes: number;
+  severity: "info" | "warning" | "critical";
+  enabled: boolean;
+  receiver_ids: string[];
+};
+
 type Notice = {
   type: "success" | "error" | "info";
   message: string;
 };
+
+type AppPage = "dashboard" | "grafana" | "alerts";
 
 const emptyVmForm: VmFormState = {
   vm_name: "",
@@ -127,6 +184,37 @@ const emptyVmForm: VmFormState = {
   environment: "dev",
   description: ""
 };
+
+const emptyReceiverForm: ReceiverFormState = {
+  receiver_name: "",
+  webhook_url: "",
+  alert_resend_interval_minutes: 15
+};
+
+const emptyAlertRuleForm: AlertRuleFormState = {
+  rule_name: "",
+  vm_id: "",
+  metric_name: "cpu_usage_percent",
+  comparison_operator: ">=",
+  threshold: 70,
+  duration_minutes: 5,
+  severity: "warning",
+  enabled: true,
+  receiver_ids: []
+};
+
+const alertMetricOptions = [
+  { value: "cpu_usage_percent", label: "CPU usage", unit: "%" },
+  { value: "memory_usage_percent", label: "Memory usage", unit: "%" },
+  { value: "disk_usage_percent", label: "Disk usage", unit: "%" }
+];
+
+const alertOperatorOptions = [
+  { value: ">", label: ">", helper: "Greater than threshold" },
+  { value: ">=", label: ">=", helper: "Greater than or equal to threshold" },
+  { value: "<=", label: "<=", helper: "Less than or equal to threshold" },
+  { value: "<", label: "<", helper: "Less than threshold" }
+] as const;
 
 const cloudOptions = [
   { value: "aws", label: "AWS" },
@@ -243,6 +331,105 @@ function statusTone(status: string): "green" | "red" | "amber" | "gray" {
     return "amber";
   }
   return "gray";
+}
+
+function receiverTone(status: AlertReceiver["verification_status"]): "green" | "red" | "amber" | "gray" {
+  /* Map receiver verification status to compact visual status tones. */
+  if (status === "VERIFIED") {
+    return "green";
+  }
+  if (status === "FAILED") {
+    return "red";
+  }
+  return "amber";
+}
+
+function severityTone(severity: AlertRule["severity"]): "green" | "red" | "amber" | "gray" {
+  /* Map alert severity values to badge tones. */
+  if (severity === "critical") {
+    return "red";
+  }
+  if (severity === "warning") {
+    return "amber";
+  }
+  return "gray";
+}
+
+function metricSelector(metricName: string, labels: Record<string, string | null>): string {
+  /* Build a small PromQL metric selector for frontend preview only. */
+  const activeLabels = Object.entries(labels).filter(([, value]) => value);
+  if (!activeLabels.length) {
+    return metricName;
+  }
+  return `${metricName}{${activeLabels.map(([key, value]) => `${key}="${value}"`).join(",")}}`;
+}
+
+function buildPromqlPreview(form: AlertRuleFormState): string {
+  /* Mirror backend PromQL generation so users can inspect the stored expression. */
+  const vmLabel = form.vm_id || null;
+  const threshold = Number.isFinite(form.threshold) ? form.threshold : 0;
+  if (form.metric_name === "cpu_usage_percent") {
+    const idle = metricSelector("system_cpu_time_seconds_total", { state: "idle", vm_id: vmLabel });
+    return `(100 * (1 - avg by (vm_id) (rate(${idle}[${form.duration_minutes}m])))) ${form.comparison_operator} ${threshold}`;
+  }
+  if (form.metric_name === "memory_usage_percent") {
+    const used = metricSelector("system_memory_usage_bytes", { state: "used", vm_id: vmLabel });
+    const total = metricSelector("system_memory_usage_bytes", { vm_id: vmLabel });
+    return `(100 * sum by (vm_id) (${used}) / sum by (vm_id) (${total})) ${form.comparison_operator} ${threshold}`;
+  }
+  const used = metricSelector("system_filesystem_usage_bytes", { state: "used", vm_id: vmLabel });
+  const total = metricSelector("system_filesystem_usage_bytes", { vm_id: vmLabel });
+  return `(100 * sum by (vm_id) (${used}) / sum by (vm_id) (${total})) ${form.comparison_operator} ${threshold}`;
+}
+
+function buildConditionPreview(form: AlertRuleFormState): string {
+  /* Build the same readable condition text backend stores with a rule. */
+  const metricLabel = alertMetricOptions.find((metric) => metric.value === form.metric_name)?.label || "Metric";
+  return `${metricLabel} ${form.comparison_operator} ${form.threshold}% for ${form.duration_minutes}m`;
+}
+
+function parseRuleCondition(rule: AlertRule): Pick<AlertRuleFormState, "comparison_operator" | "threshold"> {
+  /* Rehydrate structured form values from backend-generated condition text. */
+  const match = rule.condition_text?.match(/\s(>=|<=|>|<)\s([0-9]+(?:\.[0-9]+)?)%/);
+  return {
+    comparison_operator: (match?.[1] as AlertRuleFormState["comparison_operator"]) || ">=",
+    threshold: match?.[2] ? Number(match[2]) : 70
+  };
+}
+
+function parseRuleDurationMinutes(duration: string): number {
+  /* Rehydrate minute duration from stored vmalert duration text. */
+  const minutes = Number(duration.replace("m", ""));
+  if (!Number.isFinite(minutes)) {
+    return 5;
+  }
+  return Math.min(60, Math.max(2, minutes));
+}
+
+function createAlertRuleFormFromRule(rule: AlertRule): AlertRuleFormState {
+  /* Convert an existing alert rule into modal form state for editing. */
+  const condition = parseRuleCondition(rule);
+  const knownMetric = alertMetricOptions.some((metric) => metric.value === rule.metric_name);
+  return {
+    rule_name: rule.rule_name,
+    vm_id: rule.vm_id || "",
+    metric_name: knownMetric && rule.metric_name ? rule.metric_name : "cpu_usage_percent",
+    comparison_operator: condition.comparison_operator,
+    threshold: condition.threshold,
+    duration_minutes: parseRuleDurationMinutes(rule.duration),
+    severity: rule.severity,
+    enabled: rule.enabled,
+    receiver_ids: [...rule.receiver_ids]
+  };
+}
+
+function createReceiverFormFromReceiver(receiver: AlertReceiver): ReceiverFormState {
+  /* Convert an existing receiver into modal form state for editing. */
+  return {
+    receiver_name: receiver.receiver_name,
+    webhook_url: receiver.webhook_url,
+    alert_resend_interval_minutes: receiver.alert_resend_interval_minutes || 15
+  };
 }
 
 function toPayload(form: VmFormState): Record<string, string | null> {
@@ -821,6 +1008,650 @@ function VmMonitoringPage({
           ))}
         </div>
       )}
+
+    </section>
+  );
+}
+
+function AlertingPage({ token, vms }: { token: string; vms: Vm[] }) {
+  /* Render webhook receiver verification and alert rule management. */
+  const [receivers, setReceivers] = useState<AlertReceiver[]>([]);
+  const [rules, setRules] = useState<AlertRule[]>([]);
+  const [receiverForm, setReceiverForm] = useState<ReceiverFormState>(emptyReceiverForm);
+  const [ruleForm, setRuleForm] = useState<AlertRuleFormState>(emptyAlertRuleForm);
+  const [otpByReceiver, setOtpByReceiver] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [alertTab, setAlertTab] = useState<"rules" | "receivers">("rules");
+  const [receiverModal, setReceiverModal] = useState<{ receiver?: AlertReceiver } | null>(null);
+  const [ruleModal, setRuleModal] = useState<{ rule?: AlertRule } | null>(null);
+  const [alertSearch, setAlertSearch] = useState("");
+
+  const verifiedReceivers = useMemo(
+    () => receivers.filter((receiver) => receiver.enabled && receiver.verification_status === "VERIFIED"),
+    [receivers]
+  );
+
+  const promqlPreview = useMemo(() => buildPromqlPreview(ruleForm), [ruleForm]);
+  const conditionPreview = useMemo(() => buildConditionPreview(ruleForm), [ruleForm]);
+  const filteredRules = useMemo(() => {
+    const queryText = alertSearch.trim().toLowerCase();
+    if (alertTab !== "rules" || !queryText) {
+      return rules;
+    }
+    return rules.filter((rule) => {
+      const text = [
+        rule.rule_name,
+        rule.rule_code,
+        rule.metric_name || "",
+        rule.condition_text || "",
+        rule.severity,
+        vmName(rule.vm_id),
+        rule.receiver_ids.map(receiverName).join(" ")
+      ].join(" ").toLowerCase();
+      return text.includes(queryText);
+    });
+  }, [alertSearch, alertTab, rules, receivers, vms]);
+  const filteredReceivers = useMemo(() => {
+    const queryText = alertSearch.trim().toLowerCase();
+    if (alertTab !== "receivers" || !queryText) {
+      return receivers;
+    }
+    return receivers.filter((receiver) => {
+      const text = [
+        receiver.receiver_name,
+        receiver.webhook_url,
+        receiver.verification_status
+      ].join(" ").toLowerCase();
+      return text.includes(queryText);
+    });
+  }, [alertSearch, alertTab, receivers]);
+
+  function receiverName(receiverId: string): string {
+    /* Return a display name for a receiver id bound to a rule. */
+    return receivers.find((receiver) => receiver.id === receiverId)?.receiver_name || "Receiver";
+  }
+
+  function vmName(vmId: string | null): string {
+    /* Return a display name for an optional VM id bound to a rule. */
+    if (!vmId) {
+      return "All VMs";
+    }
+    return vms.find((vm) => vm.id === vmId)?.vm_name || "VM";
+  }
+
+  function metricName(metric: string | null): string {
+    /* Return the display label for a stored alert metric key. */
+    return alertMetricOptions.find((option) => option.value === metric)?.label || metric || "N/A";
+  }
+
+  async function loadAlerting() {
+    /* Load receivers and rules from the backend alerting API. */
+    setLoading(true);
+    try {
+      const [receiverData, ruleData] = await Promise.all([
+        apiRequest<{ items: AlertReceiver[] }>("/alert-receivers", {}, token),
+        apiRequest<{ items: AlertRule[] }>("/alert-rules", {}, token)
+      ]);
+      setReceivers(receiverData.items);
+      setRules(ruleData.items);
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not load alerting configuration" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function openReceiverModal(receiver?: AlertReceiver) {
+    /* Open create or edit receiver modal with the correct form state. */
+    setReceiverForm(receiver ? createReceiverFormFromReceiver(receiver) : emptyReceiverForm);
+    setReceiverModal(receiver ? { receiver } : {});
+  }
+
+  function openRuleModal(rule?: AlertRule) {
+    /* Open create or edit alert rule modal with the correct form state. */
+    setRuleForm(rule ? createAlertRuleFormFromRule(rule) : emptyAlertRuleForm);
+    setRuleModal(rule ? { rule } : {});
+  }
+
+  async function saveReceiver(event: FormEvent<HTMLFormElement>) {
+    /* Create or update a webhook receiver and trigger OTP delivery when needed. */
+    event.preventDefault();
+    const editingReceiver = receiverModal?.receiver;
+    setBusyId(editingReceiver ? `save-receiver-${editingReceiver.id}` : "create-receiver");
+    try {
+      const receiver = await apiRequest<AlertReceiver>(editingReceiver ? `/alert-receivers/${editingReceiver.id}` : "/alert-receivers", {
+        method: editingReceiver ? "PUT" : "POST",
+        body: JSON.stringify({
+          receiver_name: receiverForm.receiver_name.trim(),
+          webhook_url: receiverForm.webhook_url.trim(),
+          alert_resend_interval_minutes: receiverForm.alert_resend_interval_minutes,
+          enabled: editingReceiver?.enabled ?? true
+        })
+      }, token);
+      setReceiverForm(emptyReceiverForm);
+      setReceiverModal(null);
+      setNotice({
+        type: receiver.verification_status === "FAILED" ? "error" : "success",
+        message: receiver.verification_status === "FAILED"
+          ? "Receiver saved, but OTP delivery failed"
+          : editingReceiver
+            ? "Receiver updated"
+            : "Receiver saved and OTP sent"
+      });
+      await loadAlerting();
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not save receiver" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function verifyReceiver(receiver: AlertReceiver) {
+    /* Verify a receiver using the OTP the backend delivered to the webhook. */
+    const otp = (otpByReceiver[receiver.id] || "").trim();
+    if (otp.length !== 6) {
+      setNotice({ type: "error", message: "OTP must be 6 digits" });
+      return;
+    }
+    setBusyId(`verify-${receiver.id}`);
+    try {
+      await apiRequest<AlertReceiver>(`/alert-receivers/${receiver.id}/verify`, {
+        method: "POST",
+        body: JSON.stringify({ otp })
+      }, token);
+      setOtpByReceiver((current) => ({ ...current, [receiver.id]: "" }));
+      setNotice({ type: "success", message: "Receiver verified" });
+      await loadAlerting();
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not verify receiver" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function resendReceiverOtp(receiver: AlertReceiver) {
+    /* Request a fresh verification OTP for a receiver. */
+    setBusyId(`resend-${receiver.id}`);
+    try {
+      await apiRequest<AlertReceiver>(`/alert-receivers/${receiver.id}/resend-verification`, { method: "POST" }, token);
+      setNotice({ type: "success", message: "OTP sent" });
+      await loadAlerting();
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not resend OTP" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteReceiver(receiver: AlertReceiver) {
+    /* Delete a webhook receiver after confirmation. */
+    if (!window.confirm(`Delete receiver ${receiver.receiver_name}?`)) {
+      return;
+    }
+    setBusyId(`delete-receiver-${receiver.id}`);
+    try {
+      await apiRequest<void>(`/alert-receivers/${receiver.id}`, { method: "DELETE" }, token);
+      setNotice({ type: "success", message: "Receiver deleted" });
+      await loadAlerting();
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not delete receiver" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function saveAlertRule(event: FormEvent<HTMLFormElement>) {
+    /* Create or update an alert rule and bind it to selected verified receivers. */
+    event.preventDefault();
+    if (!ruleForm.receiver_ids.length) {
+      setNotice({ type: "error", message: "Select at least one verified receiver" });
+      return;
+    }
+    const editingRule = ruleModal?.rule;
+    setBusyId(editingRule ? `save-rule-${editingRule.id}` : "create-rule");
+    try {
+      await apiRequest<AlertRule>(editingRule ? `/alert-rules/${editingRule.id}` : "/alert-rules", {
+        method: editingRule ? "PUT" : "POST",
+        body: JSON.stringify({
+          rule_name: ruleForm.rule_name.trim(),
+          vm_id: ruleForm.vm_id || null,
+          metric_name: ruleForm.metric_name,
+          comparison_operator: ruleForm.comparison_operator,
+          threshold: ruleForm.threshold,
+          duration_minutes: ruleForm.duration_minutes,
+          severity: ruleForm.severity,
+          enabled: ruleForm.enabled,
+          receiver_ids: ruleForm.receiver_ids
+        })
+      }, token);
+      setRuleForm(emptyAlertRuleForm);
+      setRuleModal(null);
+      setNotice({ type: "success", message: editingRule ? "Alert rule updated" : "Alert rule created" });
+      await loadAlerting();
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not save alert rule" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteRule(rule: AlertRule) {
+    /* Delete an alert rule after confirmation. */
+    if (!window.confirm(`Delete rule ${rule.rule_name}?`)) {
+      return;
+    }
+    setBusyId(`delete-rule-${rule.id}`);
+    try {
+      await apiRequest<void>(`/alert-rules/${rule.id}`, { method: "DELETE" }, token);
+      setNotice({ type: "success", message: "Alert rule deleted" });
+      await loadAlerting();
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not delete alert rule" });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  useEffect(() => {
+    loadAlerting();
+  }, []);
+
+  return (
+    <section className="alerts-page">
+      <div className="alerts-toolbar">
+        <div>
+          <span className="eyebrow">Alerting</span>
+          <h2>Rules and Receivers</h2>
+        </div>
+        <Button variant="secondary" size="sm" onClick={loadAlerting}>
+          <RefreshCcw size={16} />Refresh
+        </Button>
+      </div>
+
+      <NoticeBar notice={notice} onClose={() => setNotice(null)} />
+
+      <div className="alert-tabs">
+        <button className={alertTab === "rules" ? "active" : ""} onClick={() => setAlertTab("rules")}>
+          <BellRing size={17} />Alert rules
+        </button>
+        <button className={alertTab === "receivers" ? "active" : ""} onClick={() => setAlertTab("receivers")}>
+          <Webhook size={17} />Receivers
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="loading-line">Loading alerting configuration...</div>
+      ) : (
+        <div className="alerting-grid single-tab">
+          {alertTab === "receivers" && (
+          <article className="alert-panel">
+            <div className="panel-header">
+              <div>
+                <span className="eyebrow">Receivers</span>
+                <h2>Webhook Endpoints</h2>
+              </div>
+              <Button onClick={() => openReceiverModal()}>
+                <Plus size={18} />Create receiver
+              </Button>
+            </div>
+
+            <div className="alert-table-toolbar">
+              <div className="search-box alert-search">
+                <Search size={17} />
+                <input value={alertSearch} onChange={(event) => setAlertSearch(event.target.value)} placeholder="Search receiver" />
+              </div>
+              <div className="alert-table-meta">
+                <span>Total {filteredReceivers.length} items</span>
+                <Button variant="secondary" size="icon" onClick={loadAlerting}><RefreshCcw size={17} /></Button>
+              </div>
+            </div>
+
+            {!receivers.length ? (
+                <div className="empty-state compact-empty">
+                  <Webhook size={30} />
+                  <h3>No receivers</h3>
+                </div>
+            ) : (
+              <div className="table-wrap alert-table-wrap">
+                <table className="alert-table">
+                  <thead>
+                    <tr>
+                      <th>Receiver Name</th>
+                      <th>Webhook URL</th>
+                      <th>Status</th>
+                      <th>Resend Interval</th>
+                      <th>Last Verification</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredReceivers.map((receiver) => (
+                      <tr key={receiver.id}>
+                        <td><strong>{receiver.receiver_name}</strong></td>
+                        <td>
+                          <span className="table-url"><Link2 size={14} />{receiver.webhook_url}</span>
+                          {receiver.last_verification_error && <small className="error-text">{receiver.last_verification_error}</small>}
+                        </td>
+                        <td><Badge tone={receiverTone(receiver.verification_status)}>{receiver.verification_status}</Badge></td>
+                        <td>{receiver.alert_resend_interval_minutes}m</td>
+                        <td>
+                          {receiver.verification_status === "VERIFIED"
+                            ? formatDate(receiver.verified_at)
+                            : formatDate(receiver.last_verification_sent_at)}
+                        </td>
+                        <td>
+                          <div className="table-actions">
+                            {receiver.verification_status !== "VERIFIED" && (
+                              <>
+                                <input
+                                  className="otp-table-input"
+                                  inputMode="numeric"
+                                  maxLength={6}
+                                  value={otpByReceiver[receiver.id] || ""}
+                                  onChange={(event) => setOtpByReceiver({ ...otpByReceiver, [receiver.id]: event.target.value.replace(/\D/g, "").slice(0, 6) })}
+                                  placeholder="000000"
+                                  aria-label={`OTP for ${receiver.receiver_name}`}
+                                />
+                                <Button size="sm" onClick={() => verifyReceiver(receiver)} disabled={busyId === `verify-${receiver.id}`}>
+                                  <ShieldCheck size={16} />Verify
+                                </Button>
+                                <Button variant="secondary" size="sm" onClick={() => resendReceiverOtp(receiver)} disabled={busyId === `resend-${receiver.id}`}>
+                                  <Send size={16} />Resend
+                                </Button>
+                              </>
+                            )}
+                            <Button variant="ghost" size="icon" onClick={() => openReceiverModal(receiver)}>
+                              <Pencil size={17} />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => deleteReceiver(receiver)} disabled={busyId === `delete-receiver-${receiver.id}`}>
+                              <Trash2 size={17} />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!filteredReceivers.length && (
+                  <div className="empty-state compact-empty">
+                    <Webhook size={30} />
+                    <h3>No matching receivers</h3>
+                  </div>
+                )}
+              </div>
+            )}
+          </article>
+          )}
+
+          {alertTab === "rules" && (
+          <article className="alert-panel">
+            <div className="panel-header">
+              <div>
+                <span className="eyebrow">Alert rules</span>
+                <h2>vmalert Rules</h2>
+              </div>
+              <Button onClick={() => openRuleModal()}>
+                <Plus size={18} />Create rule
+              </Button>
+            </div>
+
+            <div className="alert-table-toolbar">
+              <div className="search-box alert-search">
+                <Search size={17} />
+                <input value={alertSearch} onChange={(event) => setAlertSearch(event.target.value)} placeholder="Search alert rule" />
+              </div>
+              <div className="alert-table-meta">
+                <span>Total {filteredRules.length} items</span>
+                <Button variant="secondary" size="icon" onClick={loadAlerting}><RefreshCcw size={17} /></Button>
+              </div>
+            </div>
+
+            {!rules.length ? (
+                <div className="empty-state compact-empty">
+                  <BellRing size={30} />
+                  <h3>No alert rules</h3>
+                </div>
+            ) : (
+              <div className="table-wrap alert-table-wrap">
+                <table className="alert-table">
+                  <thead>
+                    <tr>
+                      <th>Alert Name</th>
+                      <th>Metric Name</th>
+                      <th>Receiver Channel</th>
+                      <th>Status</th>
+                      <th>Description</th>
+                      <th>VM</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRules.map((rule) => (
+                      <tr key={rule.id}>
+                        <td>
+                          <strong>{rule.rule_name}</strong>
+                          <small>{rule.rule_code}</small>
+                        </td>
+                        <td>{metricName(rule.metric_name)}</td>
+                        <td>
+                          <span className="receiver-channel">
+                            {rule.receiver_ids.length ? rule.receiver_ids.map(receiverName).join(", ") : "-"}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`status-dot ${rule.enabled ? "active" : "inactive"}`} />
+                          {rule.enabled ? "Active" : "Disabled"}
+                        </td>
+                        <td>{rule.condition_text || "-"}</td>
+                        <td>{vmName(rule.vm_id)}</td>
+                        <td>
+                          <div className="table-actions">
+                            <Button variant="ghost" size="icon" onClick={() => openRuleModal(rule)}>
+                              <Pencil size={17} />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => deleteRule(rule)} disabled={busyId === `delete-rule-${rule.id}`}>
+                              <Trash2 size={17} />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!filteredRules.length && (
+                  <div className="empty-state compact-empty">
+                    <BellRing size={30} />
+                    <h3>No matching alert rules</h3>
+                  </div>
+                )}
+              </div>
+            )}
+          </article>
+          )}
+        </div>
+      )}
+
+      {receiverModal && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal alert-config-modal" role="dialog" aria-modal="true" aria-labelledby="receiver-modal-title">
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">Receiver</span>
+                <h2 id="receiver-modal-title">{receiverModal.receiver ? "Edit receiver" : "Create receiver"}</h2>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setReceiverModal(null)}><X size={18} /></Button>
+            </div>
+            <form className="receiver-form modal-form" onSubmit={saveReceiver}>
+              <label>
+                Receiver name
+                <input
+                  value={receiverForm.receiver_name}
+                  onChange={(event) => setReceiverForm({ ...receiverForm, receiver_name: event.target.value })}
+                  required
+                />
+              </label>
+              <label>
+                Webhook URL
+                <input
+                  type="url"
+                  value={receiverForm.webhook_url}
+                  onChange={(event) => setReceiverForm({ ...receiverForm, webhook_url: event.target.value })}
+                  required
+                />
+              </label>
+              <label className="wide duration-slider resend-slider">
+                Alert Resend Interval (Minutes)
+                <div>
+                  <span>10</span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={60}
+                    value={receiverForm.alert_resend_interval_minutes}
+                    onChange={(event) => setReceiverForm({ ...receiverForm, alert_resend_interval_minutes: Number(event.target.value) })}
+                  />
+                  <span>60</span>
+                  <output>{receiverForm.alert_resend_interval_minutes}</output>
+                </div>
+              </label>
+              <div className="modal-actions wide">
+                <Button variant="secondary" onClick={() => setReceiverModal(null)}>Cancel</Button>
+                <Button type="submit" disabled={busyId === "create-receiver" || busyId === `save-receiver-${receiverModal.receiver?.id}`}>
+                  <Send size={17} />{receiverModal.receiver ? "Update receiver" : "Create receiver"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {ruleModal && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal alert-rule-modal" role="dialog" aria-modal="true" aria-labelledby="rule-modal-title">
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">Alert rule</span>
+                <h2 id="rule-modal-title">{ruleModal.rule ? "Edit alert rule" : "Create alert rule"}</h2>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setRuleModal(null)}><X size={18} /></Button>
+            </div>
+            <form className="rule-form modal-form" onSubmit={saveAlertRule}>
+              <label>
+                Rule name
+                <input
+                  value={ruleForm.rule_name}
+                  onChange={(event) => setRuleForm({ ...ruleForm, rule_name: event.target.value })}
+                  required
+                />
+              </label>
+              <label>
+                VM
+                <select value={ruleForm.vm_id} onChange={(event) => setRuleForm({ ...ruleForm, vm_id: event.target.value })}>
+                  <option value="">All VMs</option>
+                  {vms.map((vm) => <option key={vm.id} value={vm.id}>{vm.vm_name}</option>)}
+                </select>
+              </label>
+              <label>
+                Severity
+                <select value={ruleForm.severity} onChange={(event) => setRuleForm({ ...ruleForm, severity: event.target.value as AlertRule["severity"] })}>
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
+              <label>
+                Metric
+                <select value={ruleForm.metric_name} onChange={(event) => setRuleForm({ ...ruleForm, metric_name: event.target.value })}>
+                  {alertMetricOptions.map((metric) => (
+                    <option key={metric.value} value={metric.value}>{metric.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Alert Threshold
+                <div className="threshold-input">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={ruleForm.threshold}
+                    onChange={(event) => setRuleForm({ ...ruleForm, threshold: Number(event.target.value) })}
+                    required
+                  />
+                  <span>%</span>
+                </div>
+              </label>
+              <div className="wide operator-grid" aria-label="Trigger alert when metric">
+                {alertOperatorOptions.map((operator) => (
+                  <button
+                    key={operator.value}
+                    type="button"
+                    className={ruleForm.comparison_operator === operator.value ? "active" : ""}
+                    onClick={() => setRuleForm({ ...ruleForm, comparison_operator: operator.value })}
+                  >
+                    <span>{operator.label}</span>
+                    <small>{operator.helper}</small>
+                  </button>
+                ))}
+              </div>
+              <label className="wide duration-slider">
+                Evaluation Period (Minutes)
+                <div>
+                  <span>02</span>
+                  <input
+                    type="range"
+                    min={2}
+                    max={60}
+                    value={ruleForm.duration_minutes}
+                    onChange={(event) => setRuleForm({ ...ruleForm, duration_minutes: Number(event.target.value) })}
+                  />
+                  <span>60</span>
+                  <output>{ruleForm.duration_minutes}</output>
+                </div>
+              </label>
+              <label className="wide generated-field">
+                Generated PromQL
+                <textarea value={promqlPreview} readOnly />
+              </label>
+              <label className="wide generated-field">
+                Condition text
+                <input value={conditionPreview} readOnly />
+              </label>
+              <label className="wide">
+                Receivers
+                <select
+                  multiple
+                  className="receiver-multi-select"
+                  value={ruleForm.receiver_ids}
+                  onChange={(event) => {
+                    const selectedIds = Array.from(event.currentTarget.selectedOptions).map((option) => option.value);
+                    setRuleForm({ ...ruleForm, receiver_ids: selectedIds });
+                  }}
+                  required
+                >
+                  {verifiedReceivers.map((receiver) => (
+                    <option key={receiver.id} value={receiver.id}>{receiver.receiver_name}</option>
+                  ))}
+                </select>
+                {!verifiedReceivers.length && <span className="form-hint">No verified receivers</span>}
+              </label>
+              <label className="check-row wide">
+                <input type="checkbox" checked={ruleForm.enabled} onChange={(event) => setRuleForm({ ...ruleForm, enabled: event.target.checked })} />
+                <span>Enabled</span>
+              </label>
+              <div className="modal-actions wide">
+                <Button variant="secondary" onClick={() => setRuleModal(null)}>Cancel</Button>
+                <Button type="submit" disabled={Boolean(busyId) || !ruleForm.receiver_ids.length}>
+                  <BellRing size={17} />{ruleModal.rule ? "Update rule" : "Create rule"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -846,7 +1677,7 @@ function AppShell({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "running" | "attention">("all");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [page, setPage] = useState<"dashboard" | "grafana">("dashboard");
+  const [page, setPage] = useState<AppPage>("dashboard");
   const [modalState, setModalState] = useState<{ vm?: Vm; form: VmFormState } | null>(null);
 
   const selectedVm = useMemo(() => vms.find((vm) => vm.id === selectedVmId) || vms[0] || null, [selectedVmId, vms]);
@@ -1018,6 +1849,7 @@ function AppShell({
         <nav>
           <button className={page === "dashboard" ? "active" : ""} onClick={() => setPage("dashboard")}><LayoutDashboard size={18} />Dashboard</button>
           <button className={page === "grafana" ? "active" : ""} onClick={() => setPage("grafana")}><BarChart3 size={18} />Monitoring</button>
+          <button className={page === "alerts" ? "active" : ""} onClick={() => setPage("alerts")}><BellRing size={18} />Alerting</button>
         </nav>
         <div className="sidebar-footer">
           <div className="user-chip">
@@ -1036,11 +1868,15 @@ function AppShell({
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)}><Menu size={20} /></Button>
           <div>
             <span className="eyebrow">Multi-cloud VM monitoring</span>
-            <h1>{page === "grafana" ? "VM Monitoring" : "Operations Dashboard"}</h1>
+            <h1>{page === "grafana" ? "VM Monitoring" : page === "alerts" ? "Alerting" : "Operations Dashboard"}</h1>
           </div>
           <div className="topbar-actions">
-            <Button variant="secondary" onClick={loadVms}><RefreshCcw size={17} />Refresh</Button>
-            <Button onClick={() => setModalState({ form: emptyVmForm })}><Plus size={18} />Add VM</Button>
+            {page !== "alerts" && (
+              <>
+                <Button variant="secondary" onClick={loadVms}><RefreshCcw size={17} />Refresh</Button>
+                <Button onClick={() => setModalState({ form: emptyVmForm })}><Plus size={18} />Add VM</Button>
+              </>
+            )}
           </div>
         </header>
 
@@ -1155,13 +1991,15 @@ function AppShell({
               </aside>
             </section>
           </>
-        ) : (
+        ) : page === "grafana" ? (
           <VmMonitoringPage
             vm={selectedVm}
             vms={vms}
             token={token}
             onSelectVm={(vmId) => setSelectedVmId(vmId)}
           />
+        ) : (
+          <AlertingPage token={token} vms={vms} />
         )}
       </main>
 

@@ -5,10 +5,14 @@ route:
   receiver: default
   group_by:
     - alertname
+    - rule_id
     - vm_id
   group_wait: 30s
   group_interval: 5m
-  repeat_interval: 1h
+  repeat_interval: 1m
 
 receivers:
   - name: default
+    webhook_configs:
+      - url: http://admin-backend:8080/internal/alerts/alertmanager
+        send_resolved: true

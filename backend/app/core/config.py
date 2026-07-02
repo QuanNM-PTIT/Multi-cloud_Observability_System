@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     grafana_admin_password: str = Field(default="admin", alias="GRAFANA_ADMIN_PASSWORD")
     victoriametrics_internal_url: str = Field(default="http://victoriametrics:8428", alias="VICTORIAMETRICS_INTERNAL_URL")
     alertmanager_internal_url: str = Field(default="http://vmalertmanager:9093", alias="ALERTMANAGER_INTERNAL_URL")
+    receiver_otp_expire_minutes: int = Field(default=10, alias="RECEIVER_OTP_EXPIRE_MINUTES")
+    receiver_webhook_timeout_seconds: float = Field(default=5.0, alias="RECEIVER_WEBHOOK_TIMEOUT_SECONDS")
+    alert_dispatch_timeout_seconds: float = Field(default=10.0, alias="ALERT_DISPATCH_TIMEOUT_SECONDS")
+    vmalert_rules_file: Path = Field(default=Path("configs/vmalert/rules/portal-alert-rules.yml"), alias="VMALERT_RULES_FILE")
+    vmalert_reload_url: str | None = Field(default="http://vmalert:8880/-/reload", alias="VMALERT_RELOAD_URL")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
